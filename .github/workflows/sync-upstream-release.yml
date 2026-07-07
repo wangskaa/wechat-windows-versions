@@ -20,17 +20,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout fork
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Sync tags
-        run: |
-          git remote add upstream "https://github.com/${UPSTREAM}.git"
-          git fetch upstream --tags
-          git push origin --tags
-
       - name: Sync latest release assets
         env:
           GH_TOKEN: ${{ github.token }}
@@ -57,7 +46,7 @@ jobs:
           FILES=(assets/*)
 
           if [ "$PRERELEASE" = "true" ]; then
-            gh release create "$TAG" "${FILES[@]}" -R "$GITHUB_REPOSITORY" -t "$NAME" -F release-notes.md --verify-tag --prerelease
+            gh release create "$TAG" "${FILES[@]}" -R "$GITHUB_REPOSITORY" -t "$NAME" -F release-notes.md --prerelease
           else
-            gh release create "$TAG" "${FILES[@]}" -R "$GITHUB_REPOSITORY" -t "$NAME" -F release-notes.md --verify-tag
+            gh release create "$TAG" "${FILES[@]}" -R "$GITHUB_REPOSITORY" -t "$NAME" -F release-notes.md
           fi
