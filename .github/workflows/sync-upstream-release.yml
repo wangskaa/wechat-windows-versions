@@ -1,4 +1,4 @@
-name: Sync upstream release
+name: Sync all upstream releases
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: sync-upstream-release
+  group: sync-upstream-releases
   cancel-in-progress: false
 
 env:
@@ -18,35 +18,49 @@ env:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
 
     steps:
-      - name: Sync latest release assets
+      - name: Sync all release assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -e
 
-          TAG="$(gh release view -R "$UPSTREAM" --json tagName -q .tagName)"
+          gh release list -R "$UPSTREAM" --limit 1000 --json tagName --jq '.[].tagName' > tags.txt
 
-          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release already exists: $TAG"
-            exit 0
-          fi
+          while read -r TAG; do
+            [ -z "$TAG" ] && continue
 
-          mkdir -p assets
-          gh release download "$TAG" -R "$UPSTREAM" -D assets --pattern "*" --clobber
+            echo "Checking release: $TAG"
 
-          gh release view "$TAG" -R "$UPSTREAM" --json name,body,isPrerelease > release.json
-          jq -r '.body // ""' release.json > release-notes.md
+            if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "Already exists, skip: $TAG"
+              continue
+            fi
 
-          NAME="$(jq -r '.name // "'"$TAG"'"' release.json)"
-          PRERELEASE="$(jq -r '.isPrerelease' release.json)"
+            rm -rf assets release.json release-notes.md
+            mkdir -p assets
 
-          shopt -s nullglob
-          FILES=(assets/*)
+            echo "Downloading assets: $TAG"
+            gh release download "$TAG" -R "$UPSTREAM" -D assets --pattern "*" --clobber || true
 
-          if [ "$PRERELEASE" = "true" ]; then
-            gh release create "$TAG" "${FILES[@]}" -R "$GITHUB_REPOSITORY" -t "$NAME" -F release-notes.md --prerelease
-          else
-            gh release create "$TAG" "${FILES[@]}" -R "$GITHUB_REPOSITORY" -t "$NAME" -F release-notes.md
-          fi
+            gh release view "$TAG" -R "$UPSTREAM" --json name,body,isPrerelease > release.json
+            jq -r '.body // ""' release.json > release-notes.md
+
+            NAME="$(jq -r '.name // "'"$TAG"'"' release.json)"
+            PRERELEASE="$(jq -r '.isPrerelease' release.json)"
+
+            shopt -s nullglob
+            FILES=(assets/*)
+
+            echo "Creating release: $TAG"
+
+            if [ "$PRERELEASE" = "true" ]; then
+              gh release create "$TAG" "${FILES[@]}" -R "$GITHUB_REPOSITORY" -t "$NAME" -F release-notes.md --prerelease
+            else
+              gh release create "$TAG" "${FILES[@]}" -R "$GITHUB_REPOSITORY" -t "$NAME" -F release-notes.md
+            fi
+
+            echo "Done: $TAG"
+          done < tags.txt
