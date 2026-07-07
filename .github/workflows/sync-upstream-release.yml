@@ -1,0 +1,63 @@
+name: Sync upstream release
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream-release
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: cscnk52/wechat-windows-versions
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Sync tags
+        run: |
+          git remote add upstream "https://github.com/${UPSTREAM}.git"
+          git fetch upstream --tags
+          git push origin --tags
+
+      - name: Sync latest release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+
+          TAG="$(gh release view -R "$UPSTREAM" --json tagName -q .tagName)"
+
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release already exists: $TAG"
+            exit 0
+          fi
+
+          mkdir -p assets
+          gh release download "$TAG" -R "$UPSTREAM" -D assets --pattern "*" --clobber
+
+          gh release view "$TAG" -R "$UPSTREAM" --json name,body,isPrerelease > release.json
+          jq -r '.body // ""' release.json > release-notes.md
+
+          NAME="$(jq -r '.name // "'"$TAG"'"' release.json)"
+          PRERELEASE="$(jq -r '.isPrerelease' release.json)"
+
+          shopt -s nullglob
+          FILES=(assets/*)
+
+          if [ "$PRERELEASE" = "true" ]; then
+            gh release create "$TAG" "${FILES[@]}" -R "$GITHUB_REPOSITORY" -t "$NAME" -F release-notes.md --verify-tag --prerelease
+          else
+            gh release create "$TAG" "${FILES[@]}" -R "$GITHUB_REPOSITORY" -t "$NAME" -F release-notes.md --verify-tag
+          fi
